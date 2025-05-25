@@ -10,16 +10,19 @@ import seaborn as sns
 st.set_page_config(page_title="NYC Property Predictor", layout="wide")
 st.title("🏙️ NYC Property Sale Price Predictor")
 
-# Upload section
-st.sidebar.header("📁 Upload NYC CSV File")
-uploaded_file = st.sidebar.file_uploader("Upload your dataset (same format used for training)", type=["csv"])
-
 # Load model and feature names
 @st.cache_resource
 def load_model():
     return joblib.load("model.pkl")  # returns (model, expected_features)
 
 model, expected_features = load_model()
+
+# Load NYC dataset from file
+@st.cache_data
+def load_data():
+    return pd.read_csv("nyc_data.csv")
+
+df_raw = load_data()
 
 # Preprocessing function
 def preprocess(df):
@@ -31,7 +34,7 @@ def preprocess(df):
     df["SALE YEAR"] = df["SALE DATE"].dt.year
     df["SALE MONTH"] = df["SALE DATE"].dt.month
 
-    # Clean numeric columns (remove commas and cast)
+    # Clean numeric columns
     numeric_cols = [
         "SALE PRICE", "GROSS SQUARE FEET", "LAND SQUARE FEET",
         "RESIDENTIAL UNITS", "YEAR BUILT"
@@ -39,11 +42,10 @@ def preprocess(df):
     for col_name in numeric_cols:
         df[col_name] = pd.to_numeric(df[col_name].astype(str).str.replace(",", ""), errors="coerce")
 
-    # Create features
+    # Feature engineering
     df["BUILDING AGE"] = df["SALE YEAR"] - df["YEAR BUILT"]
     df["PRICE PER SQFT"] = df["SALE PRICE"] / df["GROSS SQUARE FEET"]
 
-    # Add SEASON
     def get_season(m):
         if m in [12, 1, 2]: return "Winter"
         elif m in [3, 4, 5]: return "Spring"
@@ -75,50 +77,46 @@ def preprocess(df):
     return df
 
 # Main logic
-if uploaded_file:
-    df_raw = pd.read_csv(uploaded_file)
-    st.subheader("📊 Preview of Uploaded Data")
-    st.dataframe(df_raw.head())
+st.subheader("📊 Preview of NYC Property Data")
+st.dataframe(df_raw.head())
 
-    try:
-        df_processed = preprocess(df_raw)
+try:
+    df_processed = preprocess(df_raw)
 
-        X = df_processed.drop("SALE PRICE", axis=1)
-        y_true = df_processed["SALE PRICE"]
+    X = df_processed.drop("SALE PRICE", axis=1)
+    y_true = df_processed["SALE PRICE"]
 
-        # Align columns with what the model expects
-        X = X.reindex(columns=expected_features, fill_value=0)
+    # Align with model's expected features
+    X = X.reindex(columns=expected_features, fill_value=0)
 
-        # Predict
-        y_pred = model.predict(X)
+    # Predict
+    y_pred = model.predict(X)
 
-        st.subheader("📈 Predicted vs Actual Sale Price")
-        result_df = pd.DataFrame({
-            "Actual Price": y_true,
-            "Predicted Price": y_pred
-        })
-        st.dataframe(result_df.head(10))
+    st.subheader("📈 Predicted vs Actual Sale Price")
+    result_df = pd.DataFrame({
+        "Actual Price": y_true,
+        "Predicted Price": y_pred
+    })
+    st.dataframe(result_df.head(10))
 
-        # SHAP Explanation
-        st.subheader("🔍 SHAP Feature Importance")
-        explainer = shap.Explainer(model)
-        shap_values = explainer(X[:100])
+    # SHAP Explanation
+    st.subheader("🔍 SHAP Feature Importance")
+    explainer = shap.Explainer(model)
+    shap_values = explainer(X[:100])
 
-        fig = plt.figure()
-        shap.summary_plot(shap_values, X.iloc[:100], show=False)
+    fig = plt.figure()
+    shap.summary_plot(shap_values, X.iloc[:100], show=False)
+    st.pyplot(fig)
+
+    # Borough EDA
+    if "BOROUGH" in df_raw.columns:
+        st.subheader("📍 Average Sale Price by Borough")
+        df_raw["SALE PRICE"] = pd.to_numeric(df_raw["SALE PRICE"].astype(str).str.replace(",", ""), errors="coerce")
+        borough_avg = df_raw.groupby("BOROUGH")["SALE PRICE"].mean().reset_index()
+        fig, ax = plt.subplots(figsize=(8, 5))
+        sns.barplot(data=borough_avg, x="BOROUGH", y="SALE PRICE", ax=ax)
+        ax.set_ylabel("Average Sale Price")
         st.pyplot(fig)
 
-        # Borough EDA
-        if "BOROUGH" in df_raw.columns:
-            st.subheader("📍 Average Sale Price by Borough")
-            df_raw["SALE PRICE"] = pd.to_numeric(df_raw["SALE PRICE"].astype(str).str.replace(",", ""), errors="coerce")
-            borough_avg = df_raw.groupby("BOROUGH")["SALE PRICE"].mean().reset_index()
-            fig, ax = plt.subplots(figsize=(8, 5))
-            sns.barplot(data=borough_avg, x="BOROUGH", y="SALE PRICE", ax=ax)
-            ax.set_ylabel("Average Sale Price")
-            st.pyplot(fig)
-
-    except Exception as e:
-        st.error(f"❌ An error occurred during prediction: {e}")
-else:
-    st.info("👈 Please upload a CSV file to begin.")
+except Exception as e:
+    st.error(f"❌ An error occurred during prediction: {e}")
