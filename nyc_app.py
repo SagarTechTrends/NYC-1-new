@@ -5,14 +5,11 @@ import joblib
 import shap
 import matplotlib.pyplot as plt
 
-# For force plot rendering
-import streamlit.components.v1 as components
-
 # Page config
 st.set_page_config(page_title="NYC Property Predictor", layout="wide")
 st.title("🏙️ NYC Property Sale Price Predictor")
 
-# Load model and expected features
+# Load model and feature names
 @st.cache_resource
 def load_model():
     return joblib.load("model.pkl")  # returns (model, expected_features)
@@ -40,21 +37,21 @@ with st.form("property_form"):
     submit = st.form_submit_button("Predict Sale Price")
 
 if submit:
-    # Build input row
+    # Create feature vector
     input_dict = {
         "GROSS SQUARE FEET": gross_sqft,
         "LAND SQUARE FEET": land_sqft,
         "RESIDENTIAL UNITS": residential_units,
         "YEAR BUILT": year_built,
         "SALE YEAR": sale_year,
-        "SALE MONTH": 1,
+        "SALE MONTH": 1,  # not used here
         "BUILDING AGE": sale_year - year_built,
-        "PRICE PER SQFT": 0
+        "PRICE PER SQFT": 0  # not used for prediction, model predicts price
     }
 
     df_input = pd.DataFrame([input_dict])
 
-    # One-hot encode categoricals
+    # One-hot encoding
     df_input["SEASON_" + season] = 1
     df_input["BOROUGH_" + borough] = 1
     df_input["BUILDING CLASS CATEGORY_" + building_class_category] = 1
@@ -63,32 +60,14 @@ if submit:
     df_input["BUILDING CLASS AT PRESENT_" + building_class_present] = 1
     df_input["BUILDING CLASS AT TIME OF SALE_" + building_class_sale] = 1
 
-    # Fill missing expected columns
+    # Add missing expected columns
     for col in expected_features:
         if col not in df_input.columns:
             df_input[col] = 0
 
+    # Reorder columns to match model
     df_input = df_input[expected_features]
 
-    # Predict
+    # Prediction
     y_pred = model.predict(df_input)[0]
     st.success(f"💰 Predicted Sale Price: ${y_pred:,.2f}")
-
-    # SHAP Explanation
-    st.subheader("🔍 SHAP Explanation for This Prediction")
-    try:
-        explainer = shap.Explainer(model)
-        shap_values = explainer(df_input)
-
-        # Bar plot
-        fig, ax = plt.subplots()
-        shap.plots.bar(shap_values[0], show=False)
-        st.pyplot(fig)
-
-        # Force plot
-        st.subheader("🔬 SHAP Force Plot")
-        force_html = shap.plots.force(shap_values[0], matplotlib=False)
-        components.html(force_html.html(), height=300)
-
-    except Exception as e:
-        st.warning(f"⚠️ SHAP plot could not be generated: {e}")
